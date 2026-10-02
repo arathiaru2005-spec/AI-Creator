@@ -1,350 +1,280 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from dotenv import load_dotenv
+from gradio_client import Client
 
 import os
-import requests
-import json
-import time
+import shutil
+import uuid
+
+# Load environment variables
+load_dotenv()
 
 
-# ==================================================
-# FASTAPI APP
-# ==================================================
+# =========================================================
+# FASTAPI
+# =========================================================
 
-app = FastAPI()
+app = FastAPI(
+    title="AI Creator API"
+)
 
 
-# ==================================================
+# =========================================================
 # CORS
-# ==================================================
+# =========================================================
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://127.0.0.1:5500",
-        "http://localhost:5500"
-    ],
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 
-# ==================================================
-# GENERATED VIDEO FOLDER
-# ==================================================
+# =========================================================
+# FOLDERS
+# =========================================================
 
-os.makedirs("generated", exist_ok=True)
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-app.mount(
-    "/generated",
-    StaticFiles(directory="generated"),
-    name="generated"
+VIDEO_DIR = os.path.join(
+    BASE_DIR,
+    "generated_videos"
+)
+
+os.makedirs(
+    VIDEO_DIR,
+    exist_ok=True
 )
 
 
-# ==================================================
+# =========================================================
+# SERVE GENERATED VIDEOS
+# =========================================================
+
+app.mount(
+    "/videos",
+    StaticFiles(directory=VIDEO_DIR),
+    name="videos"
+)
+
+
+# =========================================================
 # HUGGING FACE SPACE
-# ==================================================
+# =========================================================
 
-HF_SPACE = "https://minimaxai-minimax-h3-turbo-lora.hf.space"
-
-
-# ==================================================
-# REQUEST MODEL
-# ==================================================
-
-class VideoRequest(BaseModel):
-    prompt: str
+SPACE = "Pepe104/MiniMax-H3-Turbo-LoRA-UNCENSORED"
 
 
-# ==================================================
+# =========================================================
+# CREATE CLIENT
+# =========================================================
+
+HF_TOKEN = os.getenv("HF_TOKEN")
+if not HF_TOKEN:
+    print("Warning: HF_TOKEN is not found")
+else:
+        print("HF_TOKEN found, using it to create the client")
+if HF_TOKEN:
+
+    client = Client(
+        SPACE,
+        token=HF_TOKEN
+    )
+
+else:
+
+    client = Client(
+        SPACE
+    )
+
+
+# =========================================================
 # HOME
-# ==================================================
+# =========================================================
 
 @app.get("/")
 def home():
+
     return {
-        "message": "AI Creator Backend is working!"
+        "status": "running",
+        "message": "AI Creator backend is running"
     }
 
 
-# ==================================================
+# =========================================================
 # CREATE VIDEO
-# ==================================================
+# =========================================================
 
 @app.post("/create-video")
-def create_video(data: VideoRequest):
+async def create_video(data: dict):
+
+    prompt = data.get("prompt", "").strip()
+
+    if not prompt:
+
+        return {
+            "status": "error",
+            "message": "Prompt is required"
+        }
+
 
     try:
 
-        print("====================================")
-        print("VIDEO GENERATION STARTED")
-        print("Prompt:", data.prompt)
-        print("====================================")
+        print("\n===================================")
+        print("Generating video...")
+        print("Prompt:", prompt)
+        print("===================================\n")
 
-        # ------------------------------------------
-        # STEP 1: SEND REQUEST TO HUGGING FACE
-        # ------------------------------------------
 
-        api_url = f"{HF_SPACE}/gradio_api/call/generate"
+        # -------------------------------------------------
+        # CALL HUGGING FACE SPACE
+        # -------------------------------------------------
 
-        payload = {
-            "data": [
-                data.prompt,          # prompt
-                None,                 # first image
-                None,                 # last image
-                "960x544 · 16:9 fast", # canvas
-                5,                    # duration
-                6,                    # steps
-                42,                   # seed
-                False                 # upsample
-            ]
-        }
-
-        print("Sending request to Hugging Face...")
-
-        response = requests.post(
-            api_url,
-            json=payload,
-            timeout=60
+        result = client.predict(
+            prompt=prompt,
+            api_name="/generate"
         )
 
-        print("HF response status:", response.status_code)
-        print("HF response:", response.text)
 
-        if response.status_code != 200:
-            raise Exception(
-                f"Hugging Face request failed: "
-                f"{response.status_code} - {response.text}"
-            )
+        print("\n========== HUGGING FACE RESULT ==========")
+        print(result)
+        print("=========================================\n")
 
-        response_data = response.json()
 
-        event_id = response_data.get("event_id")
+        # -------------------------------------------------
+        # FIND VIDEO FILE
+        # -------------------------------------------------
 
-        if not event_id:
-            raise Exception(
-                f"No event_id received from Hugging Face: "
-                f"{response_data}"
-            )
+        video_path = None
 
-        print("Event ID:", event_id)
 
-        # ------------------------------------------
-        # STEP 2: WAIT FOR GENERATION
-        # ------------------------------------------
+        if isinstance(result, str):
 
-        result_url = (
-            f"{HF_SPACE}/gradio_api/call/generate/{event_id}"
-        )
+            video_path = result
 
-        print("Waiting for video generation...")
 
-        video_result = None
+        elif isinstance(result, tuple):
 
-        with requests.get(
-            result_url,
-            stream=True,
-            timeout=900
-        ) as stream:
+            for item in result:
 
-            for line in stream.iter_lines(
-                decode_unicode=True
-            ):
+                if isinstance(item, str):
 
-                if not line:
-                    continue
+                    if (
+                        item.endswith(".mp4")
+                        or os.path.exists(item)
+                    ):
 
-                print("STREAM:", line)
+                        video_path = item
+                        break
 
-                # Gradio sends:
-                # event: complete
-                # data: [...]
 
-                if line.startswith("event:"):
+                elif isinstance(item, dict):
 
-                    event_type = line.replace(
-                        "event:",
-                        ""
-                    ).strip()
+                    if "path" in item:
 
-                    print(
-                        "Event type:",
-                        event_type
-                    )
+                        video_path = item["path"]
+                        break
 
-                if line.startswith("data:"):
 
-                    json_data = line.replace(
-                        "data:",
-                        "",
-                        1
-                    ).strip()
+        elif isinstance(result, dict):
 
-                    try:
+            if "path" in result:
 
-                        parsed = json.loads(
-                            json_data
-                        )
+                video_path = result["path"]
 
-                        print(
-                            "Parsed result:",
-                            parsed
-                        )
 
-                        # --------------------------------
-                        # GENERATION COMPLETE
-                        # --------------------------------
-
-                        if isinstance(parsed, list):
-
-                            video_result = parsed
-
-                    except json.JSONDecodeError:
-
-                        print(
-                            "Could not decode:",
-                            json_data
-                        )
-
-        # ------------------------------------------
+        # -------------------------------------------------
         # CHECK RESULT
-        # ------------------------------------------
+        # -------------------------------------------------
 
-        if not video_result:
-            raise Exception(
-                "Hugging Face did not return a video."
-            )
+        if not video_path:
 
-        print("FINAL RESULT:")
-        print(video_result)
+            return {
+                "status": "error",
+                "message": "Hugging Face returned a result, but no video file was found.",
+                "raw_result": str(result)
+            }
 
-        # ------------------------------------------
-        # GET VIDEO INFORMATION
-        # ------------------------------------------
 
-        video_data = video_result[0]
+        # -------------------------------------------------
+        # CHECK FILE
+        # -------------------------------------------------
 
-        print("VIDEO DATA:")
-        print(video_data)
+        if not os.path.exists(video_path):
 
-        video_url = None
+            return {
+                "status": "error",
+                "message": "Generated video file could not be found.",
+                "video_path": str(video_path)
+            }
 
-        if isinstance(video_data, dict):
 
-            # New Gradio FileData format
-            video_url = video_data.get("url")
+        # -------------------------------------------------
+        # CREATE UNIQUE FILE NAME
+        # -------------------------------------------------
 
-            if not video_url:
-                video_url = video_data.get(
-                    "path"
-                )
+        filename = (
+            f"{uuid.uuid4().hex}.mp4"
+        )
 
-        elif isinstance(video_data, str):
 
-            video_url = video_data
+        destination = os.path.join(
+            VIDEO_DIR,
+            filename
+        )
 
-        if not video_url:
-            raise Exception(
-                "Could not find video URL in response."
-            )
 
-        # ------------------------------------------
-        # MAKE URL ABSOLUTE
-        # ------------------------------------------
+        # -------------------------------------------------
+        # COPY VIDEO
+        # -------------------------------------------------
 
-        if video_url.startswith("/"):
+        shutil.copy2(
+            video_path,
+            destination
+        )
 
-            video_url = HF_SPACE + video_url
 
-        print("VIDEO URL:")
+        # -------------------------------------------------
+        # URL
+        # -------------------------------------------------
+
+        video_url = (
+            f"/videos/{filename}"
+        )
+
+
+        print("Video saved:")
+        print(destination)
+        print("Video URL:")
         print(video_url)
 
-        # ------------------------------------------
-        # DOWNLOAD VIDEO
-        # ------------------------------------------
-
-        print("Downloading video...")
-
-        video_response = requests.get(
-            video_url,
-            timeout=300
-        )
-
-        if video_response.status_code != 200:
-
-            raise Exception(
-                "Could not download generated video. "
-                f"Status: {video_response.status_code}"
-            )
-
-        # ------------------------------------------
-        # SAVE VIDEO
-        # ------------------------------------------
-
-        output_path = os.path.join(
-            "generated",
-            "generated_video.mp4"
-        )
-
-        with open(
-            output_path,
-            "wb"
-        ) as video_file:
-
-            video_file.write(
-                video_response.content
-            )
-
-        print(
-            "Video saved:",
-            output_path
-        )
-
-        # ------------------------------------------
-        # RETURN TO FRONTEND
-        # ------------------------------------------
 
         return {
 
             "status": "success",
 
-            "message":
-                "Video generated successfully!",
+            "prompt": prompt,
 
-            "prompt":
-                data.prompt,
+            "video_url": video_url
 
-            "video_url":
-                "/generated/generated_video.mp4"
         }
 
 
     except Exception as e:
 
-        print("")
-        print("====================================")
-        print("VIDEO GENERATION ERROR")
-        print("====================================")
+        print("\n========== ERROR ==========")
+        print(str(e))
+        print("===========================\n")
 
-        print(
-            type(e).__name__,
-            ":",
-            str(e)
-        )
-
-        print("====================================")
 
         return {
 
             "status": "error",
 
-            "message":
-                str(e),
+            "message": str(e)
 
-            "type":
-                type(e).__name__
         }
