@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>AI Creator</title>
+
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+
+    <div class="container">
+
+        <h1>✨ AI Creator</h1>
+
+        <p>Create amazing AI videos and posters</p>
+
+        <textarea
+            id="prompt"
+            placeholder="Describe what you want to create..."
+        ></textarea>
+
+        <div class="buttons">
+
+            <button onclick="createPoster()">
+                🖼️ Create Poster
+            </button>
+
+            <button onclick="createVideo()">
+                🎬 Create Video
+            </button>
+
+        </div>
+
+        <div id="result"></div>
+
+    </div>
+
+    <script src="script.js"></script>
+
+</body>
+
+</html>

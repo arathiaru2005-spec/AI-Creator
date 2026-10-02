@@ -1,0 +1,19 @@
+# Environment variables
+.env
+
+# Python
+__pycache__/
+*.pyc
+venv/
+.venv/
+
+# Generated files
+generated/
+generated_video.mp4
+
+# VS Code
+.vscode/
+
+# OS files
+.DS_Store
+Thumbs.db
